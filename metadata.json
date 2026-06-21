@@ -1,6 +1,0 @@
-{
-  "name": "EcoTwin",
-  "description": "Your carbon footprint visualized as a living ecosystem: upload spending logs or receipts to evolve your digital twin. Simulate green shifts and chat with EcoCoach.",
-  "requestFramePermissions": ["camera"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

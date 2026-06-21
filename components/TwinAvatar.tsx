@@ -1,12 +1,9 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+"use client";
 
 import React from 'react';
-import { motion } from 'motion/react';
-import { Sparkles, AlertTriangle, Leaf, Flame, ShieldAlert } from 'lucide-react';
-import { TwinMoodState, TwinStatus } from '../types';
+import { motion } from 'framer-motion';
+import { Sparkles, AlertTriangle, Leaf, Flame } from 'lucide-react';
+import { TwinMoodState, TwinStatus } from '@/types';
 
 interface TwinAvatarProps {
   status: TwinStatus;
@@ -149,7 +146,7 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
                 +{trendPercent}% Carbon
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-150 text-slate-700 dark:bg-slate-850 dark:text-slate-300 border border-slate-200 dark:border-slate-800">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                 Stable
               </span>
             )}
@@ -204,14 +201,14 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
                 d="M 110 90 Q 125 80 128 92 Q 115 98 110 90 Z" 
                 fill="#34D399" 
                 animate={{ rotate: [0, 5, -5, 0] }}
-                transform-origin="110px 90px"
+                style={{ transformOrigin: "110px 90px" }}
                 transition={{ duration: 3, repeat: Infinity }}
               />
               <motion.path 
                 d="M 103 115 Q 85 110 82 118 Q 98 123 103 115 Z" 
                 fill="#059669" 
                 animate={{ rotate: [0, -6, 6, 0] }}
-                transform-origin="103px 115px"
+                style={{ transformOrigin: "103px 115px" }}
                 transition={{ duration: 4, repeat: Infinity, delay: 0.5 }}
               />
             </>
@@ -224,8 +221,7 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
                 <path d="M 100 140 Q 80 125 70 120" fill="none" stroke={currentStyles.baseColor} strokeWidth="6" strokeLinecap="round" />
                 <path d="M 100 130 Q 120 115 130 110" fill="none" stroke={currentStyles.baseColor} strokeWidth="6" strokeLinecap="round" />
                 
-                {/* Gorgeous layered SVG forest canopy */}
-                {/* Deep background forest shadows */}
+                {/* Layered SVG forest canopy */}
                 <circle cx="70" cy="110" r="28" fill="#047857" opacity="0.85" />
                 <circle cx="130" cy="100" r="30" fill="#065F46" opacity="0.85" />
                 <circle cx="100" cy="85" r="38" fill="#14532D" opacity="0.9" />
@@ -293,7 +289,7 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
             </>
           ) : (
             <>
-              {/* Drought - Bone Dry Gray Tree Trunk with Crack details */}
+              {/* Drought - Bone Dry Gray Tree Trunk */}
               <path d="M 100 170 L 100 115" stroke={currentStyles.baseColor} strokeWidth="7" strokeLinecap="round" />
               
               {/* Split Ends */}
@@ -304,7 +300,7 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
               <path d="M 100 142 L 80 138" fill="none" stroke={currentStyles.baseColor} strokeWidth="4" strokeLinecap="round" />
               <path d="M 100 130 L 115 125" fill="none" stroke={currentStyles.baseColor} strokeWidth="4" strokeLinecap="round" />
 
-              {/* Absolutely zero leaves remain. Hot Solar Heat wave ripples */}
+              {/* Solar Heat wave ripples */}
               <motion.path 
                 d="M 30 70 Q 100 50 170 70" 
                 fill="none" 
@@ -328,7 +324,7 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
           )}
         </svg>
 
-        {/* Dynamic score dial badge inside physical frame */}
+        {/* Dial badge */}
         <div className="absolute right-4 bottom-4 px-3 py-1.5 rounded-2xl bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 text-center shadow-md">
           <div className="text-[10px] font-mono uppercase text-slate-400 dark:text-slate-500">Eco-Score</div>
           <div className="text-lg font-mono font-bold text-slate-800 dark:text-slate-100">{score}/100</div>
@@ -341,7 +337,7 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
           {currentStyles.desc}
         </p>
         
-        {/* Living context factor bar */}
+        {/* Vitality bar */}
         <div className="space-y-1">
           <div className="flex justify-between text-xs font-mono text-slate-400 dark:text-slate-500">
             <span>Soil Vitality</span>
@@ -362,7 +358,7 @@ export default function TwinAvatar({ status }: TwinAvatarProps) {
           </div>
         </div>
         
-        {/* Dynamic Metric Display */}
+        {/* Metric Display */}
         <div className="grid grid-cols-2 gap-3 pt-2">
           <div className="bg-white/50 dark:bg-slate-950/20 rounded-xl p-2 text-center border border-slate-200/50 dark:border-slate-800/50">
             <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500">Footprint average</div>

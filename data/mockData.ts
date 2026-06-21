@@ -6,7 +6,7 @@ export const EMISSION_FACTORS: Record<TransactionCategory, EmissionFactor> = {
     kgCo2ePerDollar: 0.82,
     label: 'Gasoline & Fuel',
     icon: 'Fuel',
-    color: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900',
+    color: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-955/40 dark:text-amber-300 dark:border-amber-900',
     tip: 'Fuel emissions are the highest daily contributor. Try carpooling, biking, or choosing rail transportation.'
   },
   'Flights': {
@@ -14,7 +14,7 @@ export const EMISSION_FACTORS: Record<TransactionCategory, EmissionFactor> = {
     kgCo2ePerDollar: 1.25,
     label: 'Aviation & Flights',
     icon: 'Plane',
-    color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900',
+    color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-955/40 dark:text-red-300 dark:border-red-900',
     tip: 'Flight emissions are catastrophic for personal budgets. Consider trains for regional travel or buy direct carbon-offset certificates.'
   },
   'Groceries': {
@@ -22,7 +22,7 @@ export const EMISSION_FACTORS: Record<TransactionCategory, EmissionFactor> = {
     kgCo2ePerDollar: 0.22,
     label: 'Food & Groceries',
     icon: 'ShoppingCart',
-    color: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900',
+    color: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-955/40 dark:text-emerald-300 dark:border-emerald-900',
     tip: 'Grocery footprints rely on meat density. Swapping beef for beans or poultry is an easy 40%+ reduction.'
   },
   'Fast Fashion': {
@@ -30,7 +30,7 @@ export const EMISSION_FACTORS: Record<TransactionCategory, EmissionFactor> = {
     kgCo2ePerDollar: 0.45,
     label: 'Apparel & Fashion',
     icon: 'Shirt',
-    color: 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-900',
+    color: 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-955/40 dark:text-purple-300 dark:border-purple-900',
     tip: 'Fast fashion chain garments are synthesized from petrochemicals. Support second-hand thrifting or purchase durable organic lines.'
   },
   'Utilities': {
@@ -38,23 +38,23 @@ export const EMISSION_FACTORS: Record<TransactionCategory, EmissionFactor> = {
     kgCo2ePerDollar: 0.65,
     label: 'Home Heating & Utilities',
     icon: 'Zap',
-    color: 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-900',
-    tip: 'Heating, gas, and grid grids. Lowering your thermostat by 2 degrees in winter saves up to 10% on energy emissions.'
+    color: 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-955/40 dark:text-blue-300 dark:border-blue-900',
+    tip: 'Heating, gas, and electricity grids. Lowering your thermostat by 2 degrees in winter saves up to 10% on energy emissions.'
   },
   'Public Transit': {
     category: 'Public Transit',
     kgCo2ePerDollar: 0.12,
     label: 'Buses, Trains & Subway',
     icon: 'Train',
-    color: 'bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-900',
+    color: 'bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-955/40 dark:text-cyan-300 dark:border-cyan-900',
     tip: 'Mass transit is 80% cleaner than individual cars. Keep using subways or commuter rail systems!'
   },
   'Restaurants & Services': {
     category: 'Restaurants & Services',
     kgCo2ePerDollar: 0.18,
     label: 'Dining & Food Services',
-    icon: 'UtensilsCursor',
-    color: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950/40 dark:text-orange-300 dark:border-orange-900',
+    icon: 'Utensils',
+    color: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-955/40 dark:text-orange-300 dark:border-orange-900',
     tip: 'Restaurant waste and overhead contribute light footprints. Prefer restaurants with farm-to-table practices.'
   },
   'Entertainment': {
@@ -70,7 +70,7 @@ export const EMISSION_FACTORS: Record<TransactionCategory, EmissionFactor> = {
     kgCo2ePerDollar: 0.04,
     label: 'Sustainable & Green Goods',
     icon: 'Sparkles',
-    color: 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-950/40 dark:text-teal-300 dark:border-teal-900',
+    color: 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-955/40 dark:text-teal-300 dark:border-teal-900',
     tip: 'Zero-waste refills, solar credits, and validated offset programs. Keeps emissions to the bare minimum.'
   }
 };
@@ -97,7 +97,7 @@ export const DEMO_PRESETS: DemoPreset[] = [
     color: 'from-amber-500/10 to-orange-600/10 hover:from-amber-500/20 hover:to-orange-600/20 border-amber-500/30 text-amber-500',
     transactions: [
       { date: '2026-06-15', merchant: 'Whole Foods Market', amount: 135.0, category: 'Groceries', source: 'seed', confidence: 1.0 },
-      { date: '2026-06-16', merchant: 'Cheveron Fueling Station', amount: 55.4, category: 'Fuel', source: 'seed', confidence: 1.0 },
+      { date: '2026-06-16', merchant: 'Chevron Fueling Station', amount: 55.4, category: 'Fuel', source: 'seed', confidence: 1.0 },
       { date: '2026-06-17', merchant: 'Target Department Store', amount: 64.0, category: 'Groceries', source: 'seed', confidence: 0.9 },
       { date: '2026-06-18', merchant: 'Netflix Subscription', amount: 22.99, category: 'Entertainment', source: 'seed', confidence: 1.0 },
       { date: '2026-06-19', merchant: 'Local Burger Diner', amount: 34.5, category: 'Restaurants & Services', source: 'seed', confidence: 1.0 },
@@ -120,7 +120,6 @@ export const DEMO_PRESETS: DemoPreset[] = [
   }
 ];
 
-// Content templates for testing CSV import directly
 export const SAMPLE_CSV_CONTENT = `Date,Merchant,Amount,Category,Source
 2026-06-18,Chevron Gas Station,54.50,Fuel,CSV
 2026-06-18,Zara Apparel,120.00,Fast Fashion,CSV
@@ -130,7 +129,6 @@ export const SAMPLE_CSV_CONTENT = `Date,Merchant,Amount,Category,Source
 2026-06-20,Pacific Electric Heat,165.00,Utilities,CSV
 2026-06-21,Patagonia repair,25.00,Eco Goods,CSV`;
 
-// Sample preloaded thermal receipt texts to let judges test OCR with 1-click
 export const SAMPLE_RECEIPT_PRESETS = [
   {
     name: "Regular Fuel Pump Receipt",
@@ -147,7 +145,7 @@ THANK YOU FOR YOUR PATRONAGE`
     name: "Fast Fashion Mall Receipt",
     emoji: "🛍️",
     text: `H&M FAST FASHION CO. #231
-STREES OF SAN FRANCISCO MALL
+STREETS OF SAN FRANCISCO MALL
 REG: 04  OP: 421  TRANS: 8821
 DATE: 2026-06-18 17:15
 * SYNTHETIC SWEATER  $39.99
