@@ -1,92 +1,107 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { EcoCoachRequestSchema } from "@/lib/validations/schemas";
 
+const IN_MEMORY_REQUESTS = new Map<string, number[]>();
+
+function rateLimit(ip: string, max = 10, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const reqs = (IN_MEMORY_REQUESTS.get(ip) ?? []).filter(
+    (t) => now - t < windowMs
+  );
+  if (reqs.length >= max) return false;
+  IN_MEMORY_REQUESTS.set(ip, [...reqs, now]);
+  return true;
+}
+
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+  if (!rateLimit(ip)) {
+    return new Response("Rate limit exceeded.", { status: 429 });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return new Response("Server misconfiguration.", { status: 500 });
+  }
+
+  let body: unknown;
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "GEMINI_API_KEY is not configured in local environment variables." },
-        { status: 500 }
-      );
-    }
+    body = await req.json();
+  } catch {
+    return new Response("Invalid JSON.", { status: 400 });
+  }
 
-    const body = await req.json();
-    const parseResult = EcoCoachRequestSchema.safeParse(body);
-    if (!parseResult.success) {
-      return NextResponse.json(
-        { success: false, error: parseResult.error.issues[0]?.message || "Invalid request body." },
-        { status: 400 }
-      );
-    }
-    const { messages, transactionHistory } = parseResult.data;
+  const parsed = EcoCoachRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return new Response("Invalid request body.", { status: 400 });
+  }
 
-    // Calculate aggregated statistics
-    let totalSpend = 0;
-    let totalCo2 = 0;
-    const categoryTotals: Record<string, number> = {};
+  const { messages, transactionHistory } = parsed.data;
 
-    if (transactionHistory && Array.isArray(transactionHistory)) {
-      transactionHistory.forEach((tx: { merchant: string; amount: number; category: string; co2e: number }) => {
-        const amount = Number(tx.amount || 0);
-        const co2e = Number(tx.co2e || 0);
-        const category = tx.category || "Eco Goods";
+  const totalSpend = transactionHistory.reduce((s, t) => s + t.amount, 0);
+  const totalCO2 = transactionHistory.reduce((s, t) => s + t.co2e, 0);
+  const byCategory = transactionHistory.reduce<Record<string, number>>(
+    (acc, t) => ({ ...acc, [t.category]: (acc[t.category] ?? 0) + t.amount }),
+    {}
+  );
 
-        totalSpend += amount;
-        totalCo2 += co2e;
-        categoryTotals[category] = (categoryTotals[category] || 0) + amount;
-      });
-    }
+  const breakdown = Object.entries(byCategory)
+    .map(([cat, amt]) => `  - ${cat}: $${amt.toFixed(2)}`)
+    .join("\n");
 
-    const categoryBreakdownText = Object.entries(categoryTotals)
-      .map(([cat, amt]) => `- ${cat}: $${amt.toFixed(2)}`)
-      .join("\n");
+  const systemPrompt = `You are EcoCoach, an expert environmental advisor with deep knowledge of carbon accounting and behavioral economics. You're witty, encouraging, and data-driven — never preachy.
 
-    const systemPrompt = 
-      "You are EcoCoach, a witty, brilliant environmental advisor. You speak directly to the user's spending behavior with real, actionable, and non-judgmental advice.\n" +
-      "The user has connected their accounts & uploaded transactions.\n" +
-      "Here is their actual direct emission profile:\n" +
-      `- Total Transactions: ${transactionHistory?.length || 0}\n` +
-      `- Total Spend: $${totalSpend.toFixed(2)}\n` +
-      `- Calculated CO2e Footprint: ${totalCo2.toFixed(1)} kgCO2e\n` +
-      "Breakdown:\n" +
-      `${categoryBreakdownText || "- None yet"}\n\n` +
-      "Guidelines:\n" +
-      "1. Always base your suggestions on their ACTUAL transactions list. Give highly practical examples (e.g. mention specific retailers from their history if present!).\n" +
-      "2. Be supportive, humorous, and educational. Avoid making them feel guilty, instead motivate them with viscerally real rewards (e.g. \"Skipping one fast fashion polyester haul will save 45 kgCO2, which is equivalent to letting your neighborhood tree grow peacefully for 2 years!\").\n" +
-      "3. Make references to overall spend factors. Keep comments short, bulleted, and very readable. Do not produce long academic essays.";
+The user's REAL transaction data:
+- Total spend: $${totalSpend.toFixed(2)} across ${transactionHistory.length} transactions
+- Calculated footprint: ${totalCO2.toFixed(1)} kgCO₂e
+- Breakdown by category:
+${breakdown}
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      systemInstruction: systemPrompt,
+Your rules:
+1. Reference SPECIFIC merchant names from their history (e.g. "Your Shell purchase on 06/19...").
+2. Convert CO₂ savings into visceral comparisons ("= 12 days of breathing clean mountain air").
+3. Keep responses under 150 words. Use bullet points for clarity.
+4. Never repeat the same advice twice in a conversation.
+5. Always end with one actionable quick win they can do TODAY.`;
+
+  const genai = new GoogleGenerativeAI(apiKey);
+  const model = genai.getGenerativeModel({
+    model: "gemini-1.5-flash",
+    systemInstruction: systemPrompt,
+  });
+
+  const lastMessage = messages[messages.length - 1];
+  const userPrompt =
+    lastMessage?.role === "user"
+      ? lastMessage.content
+      : "Greet me and give a quick summary of my carbon profile.";
+
+  try {
+    const result = await model.generateContentStream(userPrompt);
+
+    // Stream the response — ChatGPT-like UX
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of result.stream) {
+          const text = chunk.text();
+          if (text) controller.enqueue(encoder.encode(text));
+        }
+        controller.close();
+      },
     });
 
-    let activePrompt = "";
-    if (messages && messages.length > 0) {
-      const lastMsg = messages[messages.length - 1];
-      if (!lastMsg) {
-        throw new Error("No message content was found.");
-      }
-      const chatContext = messages
-        .map((m: { role: string; content: string }) => `${m.role === "user" ? "User" : "Coach"}: ${m.content}`)
-        .join("\n");
-
-      activePrompt = 
-        `Conversation History:\n${chatContext}\n\n` +
-        `Respond to the latest prompt: "${lastMsg.content}" contextually. Keep your reply concise (around 100-150 words).`;
-    } else {
-      activePrompt = "Hello! Give me a quick greeting and introduction summary of my carbon spend profile!";
-    }
-
-    const response = await model.generateContent(activePrompt);
-    const answer = response.response.text() || "I was unable to analyze this. Re-prompt me!";
-
-    return NextResponse.json({ success: true, answer });
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-cache",
+      },
+    });
   } catch (err) {
-    console.error("EcoCoach chat failed:", err);
-    const errMsg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ success: false, error: errMsg || "An error occurred with EcoCoach chatbot." }, { status: 500 });
+    const message = err instanceof Error ? err.message : "EcoCoach failed.";
+    console.error("[ecocoach]", message);
+    return new Response(message, { status: 500 });
   }
 }

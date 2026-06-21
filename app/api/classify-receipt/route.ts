@@ -1,100 +1,95 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { ClassifyReceiptSchema } from "@/lib/validations/schemas";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { ClassifyReceiptSchema, ClassifyResultSchema } from "@/lib/validations/schemas";
+import type { ClassifyReceiptResult } from "@/types";
+
+const IN_MEMORY_REQUESTS = new Map<string, number[]>();
+
+function rateLimit(ip: string, max = 20, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const reqs = (IN_MEMORY_REQUESTS.get(ip) ?? []).filter(
+    (t) => now - t < windowMs
+  );
+  if (reqs.length >= max) return false;
+  IN_MEMORY_REQUESTS.set(ip, [...reqs, now]);
+  return true;
+}
 
 export async function POST(req: NextRequest) {
+  const ip = req.headers.get("x-forwarded-for") ?? "unknown";
+  if (!rateLimit(ip)) {
+    return NextResponse.json(
+      { success: false, error: "Rate limit exceeded. Try again in a minute." },
+      { status: 429 }
+    );
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json(
+      { success: false, error: "Server misconfiguration: API key missing." },
+      { status: 500 }
+    );
+  }
+
+  let body: unknown;
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json(
-        { success: false, error: "GEMINI_API_KEY is not configured in local environment variables." },
-        { status: 500 }
-      );
+    body = await req.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Invalid JSON body." },
+      { status: 400 }
+    );
+  }
+
+  const parsed = ClassifyReceiptSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { success: false, error: parsed.error.flatten().formErrors[0] },
+      { status: 400 }
+    );
+  }
+
+  const data = parsed.data;
+  const genai = new GoogleGenerativeAI(apiKey);
+  const model = genai.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const today = new Date().toISOString().split("T")[0]!;
+
+  const SYSTEM_PROMPT = `You are an expert carbon-footprint classifier. Extract transaction details from the provided receipt and return ONLY a JSON object — no markdown, no explanation.
+
+JSON format:
+{
+  "merchant": "string (store or brand name)",
+  "amount": number (total paid, positive),
+  "date": "YYYY-MM-DD (default to ${today} if unclear)",
+  "category": "one of: Fuel | Flights | Groceries | Fast Fashion | Utilities | Public Transit | Restaurants & Services | Entertainment | Eco Goods",
+  "confidence": number (0.0-1.0)
+}`;
+
+  try {
+    const prompt =
+      data.imageBase64 && data.imageMime
+        ? [
+            { inlineData: { data: data.imageBase64.split(",").pop()!, mimeType: data.imageMime } },
+            SYSTEM_PROMPT,
+          ]
+        : `${SYSTEM_PROMPT}\n\nReceipt text:\n"""\n${data.receiptText}\n"""`;
+
+    const result = await model.generateContent(prompt as Parameters<typeof model.generateContent>[0]);
+    const text = result.response.text().trim().replace(/```json|```/g, "");
+    const json: unknown = JSON.parse(text);
+    const validated = ClassifyResultSchema.safeParse(json);
+
+    if (!validated.success) {
+      throw new Error("Gemini returned malformed data.");
     }
 
-    const body = await req.json();
-    const parseResult = ClassifyReceiptSchema.safeParse(body);
-    if (!parseResult.success) {
-      return NextResponse.json(
-        { success: false, error: parseResult.error.issues[0]?.message || "Invalid request body." },
-        { status: 400 }
-      );
-    }
-    const { receiptText, imageBase64, imageMime } = parseResult.data;
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // Using gemini-1.5-flash which is widely compatible and fast
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            merchant: { type: SchemaType.STRING, description: "Merchant or brand name (e.g. Whole Foods, Shell, Zara)" },
-            amount: { type: SchemaType.NUMBER, description: "Total price or amount paid as numeric value" },
-            date: { type: SchemaType.STRING, description: "Date of transaction formatted as YYYY-MM-DD" },
-            category: { 
-              type: SchemaType.STRING, 
-              description: "Transaction category mapping exactly to one of: Fuel, Flights, Groceries, Fast Fashion, Utilities, Public Transit, Restaurants & Services, Entertainment, Eco Goods" 
-            },
-            confidence: { type: SchemaType.NUMBER, description: "Confidence probability from 0.0 to 1.0 based on extraction clarity" }
-          },
-          required: ["merchant", "amount", "date", "category", "confidence"]
-        }
-      }
-    });
-
-    const contents: (string | { inlineData: { data: string; mimeType: string } })[] = [];
-
-    if (imageBase64 && imageMime) {
-      let cleanBase64 = imageBase64;
-      if (cleanBase64.includes(",")) {
-        cleanBase64 = cleanBase64.split(",")[1] ?? "";
-      }
-
-      contents.push({
-        inlineData: {
-          data: cleanBase64 || "",
-          mimeType: imageMime as string
-        }
-      });
-      contents.push(
-        "You are an expert carbon spending classifier. Extract transaction details from this receipt photo. " +
-        "Categorize the item into exactly one of the supported categories: " +
-        "Fuel, Flights, Groceries, Fast Fashion, Utilities, Public Transit, Restaurants & Services, Entertainment, Eco Goods. " +
-        "Extract store/merchant name, date, and total spent. Evaluate structural confidence (0.0 to 1.0)."
-      );
-    } else if (receiptText) {
-      contents.push(
-        `Analyze this raw receipt text:\n"""\n${receiptText}\n"""\n\n` +
-        "Extract:\n" +
-        "1. Store / Merchant Name\n" +
-        "2. Total amount spent (number)\n" +
-        "3. Date of transaction (YYYY-MM-DD format if found, otherwise defaulting to today's date)\n" +
-        "4. Categorize precisely into one of the categories: Fuel, Flights, Groceries, Fast Fashion, Utilities, Public Transit, Restaurants & Services, Entertainment, Eco Goods.\n" +
-        "5. Confidence value between 0.0 and 1.0 based on clarity."
-      );
-    } else {
-      return NextResponse.json(
-        { success: false, error: "Please provide either 'receiptText' or base64 image data." },
-        { status: 400 }
-      );
-    }
-
-    const response = await model.generateContent(contents);
-    const textResponse = response.response.text();
-
-    if (!textResponse) {
-      throw new Error("Gemini output payload was empty");
-    }
-
-    const result = JSON.parse(textResponse.trim());
-    return NextResponse.json({ success: true, result });
+    const classifyResult: ClassifyReceiptResult = validated.data;
+    return NextResponse.json({ success: true, result: classifyResult });
   } catch (err) {
-    console.error("Receipt OCR classification failed:", err);
-    const errMsg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ success: false, error: errMsg || "An error occurred during OCR classification." }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Classification failed.";
+    console.error("[classify-receipt]", message);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }
