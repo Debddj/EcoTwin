@@ -1,6 +1,28 @@
 # 🌿 EcoTwin: Interactive AI Carbon Sandbox
 
+🚀 **Live Deployment**: [ecotwin-carbon-twin.vercel.app](https://ecotwin-carbon-twin.vercel.app/)
+
 EcoTwin is a Next.js 14 Web Application that acts as a real-time carbon sandbox. It allows users to visualize, simulate, and optimize their carbon footprint through a digital twin ecosystem. The app features client-side state persistence, visceral simulation tools, automated Gemini OCR receipt classification, and a live streaming AI EcoCoach.
+
+---
+
+## 🛠️ Tech Stack & Architecture Insights
+
+> [!NOTE]
+> ### 🌐 Framework — Next.js 14 (App Router)
+> * **Insight**: Implements client-side views and API route handlers under a consolidated monorepo structure. Avoids CORS issues, accelerates development, and operates fully serverless.
+
+> [!TIP]
+> ### 🗄️ State Management — Zustand + Repository Pattern
+> * **Insight**: Decouples UI component updates from storage calls. Local storage persistence layer operates under the `ecotwin:transactions:v2` namespace for fast client-side offline access.
+
+> [!IMPORTANT]
+> ### 🤖 AI Core — Gemini 2.5 Flash API
+> * **Insight**: Powers structured receipt scanning OCR and typewriter Server-Sent Event (SSE) chat responses using the high-performance `gemini-2.5-flash` model.
+
+> [!WARNING]
+> ### 🎨 Styling & Animation — Tailwind CSS + Framer Motion
+> * **Insight**: Custom design system tokens supporting fluid dark-mode transitions, micro-interactions, SVG animations (TwinAvatar branch animations), and interactive UI layouts.
 
 ---
 
@@ -33,7 +55,7 @@ graph TD
 
     %% External APIs
     subgraph AI ["External AI Services"]
-        Gemini["Gemini API<br>(gemini-1.5-flash)"]
+        Gemini["Gemini API<br>(gemini-2.5-flash)"]
     end
     class Gemini gemini;
 

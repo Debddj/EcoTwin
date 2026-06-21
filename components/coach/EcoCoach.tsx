@@ -117,7 +117,7 @@ export function EcoCoach({ transactions }: Props) {
             EcoCoach AI
           </h4>
           <p className="text-[10px] text-zinc-600">
-            Streaming · Gemini 1.5 Flash
+            Streaming · Gemini 2.5 Flash
           </p>
         </div>
         <button
