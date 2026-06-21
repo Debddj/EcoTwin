@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Sparkles,
@@ -18,41 +18,44 @@ import {
   RefreshCw,
   Camera,
   Layers,
-  HelpCircle,
-  TrendingDown,
-  TrendingUp,
-  Minus,
   CheckCircle2,
   Sliders,
   MessageSquare,
   History,
-  X,
-  CreditCard,
-  ShoppingBag,
-  Info
+  Info,
+  LogOut,
+  User,
+  Shield,
+  HelpCircle,
+  Database
 } from 'lucide-react';
+
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
 import { Transaction, TransactionCategory, TwinStatus, WhatIfState, CoachMessage } from './types';
 import { EMISSION_FACTORS, DEMO_PRESETS, SAMPLE_CSV_CONTENT, SAMPLE_RECEIPT_PRESETS } from './data/mockData';
 import TwinAvatar from './components/TwinAvatar';
+import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
 
 // Standard baseline footprint calculations
-const DAILY_EMISSION_BASELINE_KG = 13.5; // Typical baseline individual (approx 5 tons/year)
+const DAILY_EMISSION_BASELINE_KG = 13.5; // Typical baseline individual
 
 export default function App() {
   // Navigation sidebar tab state
   const [activeTab, setActiveTab] = useState<'ecosystem' | 'transactions' | 'simulator' | 'coach'>('ecosystem');
 
+  // Supabase Auth States
+  const [session, setSession] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(isSupabaseConfigured);
+  const [emailInput, setEmailInput] = useState('');
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  
+  // Local Guest Mode Switcher
+  const [guestMode, setGuestMode] = useState(!isSupabaseConfigured);
+
   // Transactions State
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    // Start with suburban commuter preset preloaded
-    const defaultPreset = DEMO_PRESETS[1];
-    return defaultPreset.transactions.map((t, idx) => ({
-      ...t,
-      id: `init-${idx}-${Date.now()}`,
-      co2e: t.amount * EMISSION_FACTORS[t.category].kgCo2ePerDollar
-    })) as Transaction[];
-  });
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   // Manual Ingest State
   const [manualMerchant, setManualMerchant] = useState('');
@@ -101,96 +104,284 @@ export default function App() {
     }, 4500);
   };
 
-  // --------------------------------------------------------
-  // Core Carbon calculations & Twin state transition engine
-  // --------------------------------------------------------
-  const calculateAggregateFootprint = (txList: Transaction[], simState: WhatIfState) => {
-    let totalNormalCO2 = 0;
-    let totalSimulatedCO2 = 0;
+  // Determine active storage mode
+  const activeSupabaseMode = isSupabaseConfigured && !guestMode;
 
-    txList.forEach((tx) => {
-      const baseEmission = tx.co2e;
-       totalNormalCO2 += baseEmission;
+  // Listen to Auth State Changes
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setAuthLoading(false);
+      return;
+    }
 
-       // Apply real-time reductions based on what-if sliders
-       let factor = 1.0;
-       if (tx.category === 'Groceries') {
-         // Swapping beef/red meat (high emissions density) for beans/poultry. Max 45% reduction of grocery footprint
-         factor = 1.0 - (simState.meatReduction / 100) * 0.45;
-       } else if (tx.category === 'Fuel') {
-         // Days not driving standard cars. If 2 fewer days out of 7, reduce fuel footprint by 2/7
-         factor = 1.0 - (simState.carlessDays / 7);
-       } else if (tx.category === 'Utilities') {
-         // Lowering thermostats by degrees. Approx 4% reduction per degree Celsius offset
-         factor = 1.0 - (simState.thermostatOffset * 0.04);
-       } else if (tx.category === 'Fast Fashion') {
-         // Buying thrift/second-hand avoids 90% of raw textile fuel footprint
-         factor = 1.0 - (simState.secondHandPercent / 100) * 0.90;
-       }
-
-       totalSimulatedCO2 += baseEmission * factor;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+      if (session) {
+        setGuestMode(false);
+      }
     });
 
-    const activeCO2 = totalSimulatedCO2;
-    const weeklyTotal = activeCO2;
-    // Turn into average per day
-    const dayCount = Math.max(1, Math.ceil(txList.length / 1.5)); // estimate duration density
-    const calculatedDailyAverage = weeklyTotal / Math.max(1, dayCount);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setAuthLoading(false);
+      if (session) {
+        setGuestMode(false);
+      }
+    });
 
-    // Compute comparative Trend compared to basic regional baseline index
-    const baselineDailyIndex = DAILY_EMISSION_BASELINE_KG;
-    const percentageDifference = ((calculatedDailyAverage - baselineDailyIndex) / baselineDailyIndex) * 100;
-    
-    let trend: 'improving' | 'stable' | 'worsening' = 'stable';
-    if (percentageDifference < -5) {
-      trend = 'improving';
-    } else if (percentageDifference > 5) {
-      trend = 'worsening';
-    }
+    return () => subscription.unsubscribe();
+  }, []);
 
-    // Map carbon output to score (0 to 100). Clearer score = higher value
-    // 3.0 kgCO2/day or less = 100 points. 25.0 kgCO2e/day or more = 10 points
-    let score = Math.round(100 - (calculatedDailyAverage * 3.5));
-    score = Math.max(12, Math.min(100, score));
-
-    // Resolve twin mood thresholds
-    let state: 'sapling' | 'thriving' | 'wilting' | 'drought' = 'sapling';
-    if (score >= 82) {
-      state = 'thriving';
-    } else if (score >= 55) {
-      state = 'sapling';
-    } else if (score >= 32) {
-      state = 'wilting';
+  // Fetch or Load Transactions on Session/Mode Change
+  useEffect(() => {
+    if (activeSupabaseMode && session) {
+      fetchTransactions();
     } else {
-      state = 'drought';
+      // Local Storage Mode
+      const cached = localStorage.getItem('ecotwin_transactions');
+      if (cached) {
+        setTransactions(JSON.parse(cached));
+      } else {
+        // Preload suburban commuter preset
+        const defaultPreset = DEMO_PRESETS[1];
+        const initialTxs = defaultPreset.transactions.map((t, idx) => ({
+          ...t,
+          id: `init-${idx}-${Date.now()}`,
+          co2e: t.amount * EMISSION_FACTORS[t.category].kgCo2ePerDollar,
+          source: 'seed',
+          confidence: t.confidence
+        })) as Transaction[];
+        setTransactions(initialTxs);
+        localStorage.setItem('ecotwin_transactions', JSON.stringify(initialTxs));
+      }
     }
+  }, [session, guestMode]);
 
-    return {
-      state,
-      score,
-      carbonAverage: calculatedDailyAverage,
-      weeklyTotal,
-      trend,
-      trendPercent: Math.abs(Math.round(percentageDifference)),
-      yearlyTonsEmitted: (calculatedDailyAverage * 365) / 1000,
-      cedarsEquivalent: Math.max(0, Math.round(((DAILY_EMISSION_BASELINE_KG - calculatedDailyAverage) * 365) / 22)) // 1 tree sequesters roughly 22kg CO2 per year
-    };
+  // Sync back to local storage (only in local storage guest mode)
+  useEffect(() => {
+    if (!activeSupabaseMode) {
+      localStorage.setItem('ecotwin_transactions', JSON.stringify(transactions));
+    }
+  }, [transactions, guestMode]);
+
+  // Fetch Transactions from Supabase
+  const fetchTransactions = async () => {
+    if (!supabase || !session) return;
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+
+      if (error) throw error;
+
+      if (data) {
+        setTransactions(data.map((tx: any) => ({
+          id: tx.id,
+          date: tx.date,
+          merchant: tx.merchant,
+          amount: Number(tx.amount),
+          category: tx.category as TransactionCategory,
+          co2e: Number(tx.co2e),
+          source: tx.source as any,
+          confidence: Number(tx.confidence)
+        })));
+      }
+    } catch (err: any) {
+      showNotification("Failed loading from Supabase: " + err.message, "error");
+    }
   };
 
-  const currentStats = calculateAggregateFootprint(transactions, simulator);
+  // Auth Handler: Magic Link OTP Signin
+  const handleMagicLinkLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput.trim() || !supabase) return;
+    setAuthLoading(true);
+    setAuthError(null);
+    setAuthMessage(null);
 
-  // --------------------------------------------------------
-  // Preset Demo Seeder
-  // --------------------------------------------------------
-  const loadPreset = (preset: typeof DEMO_PRESETS[0]) => {
-    const generated = preset.transactions.map((tx, i) => ({
-      ...tx,
-      id: `seed-${Date.now()}-${i}`,
-      co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar
-    })) as Transaction[];
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: emailInput.trim(),
+        options: {
+          emailRedirectTo: window.location.origin
+        }
+      });
+
+      if (error) throw error;
+      setAuthMessage("Magic sign-in link has been sent to your email!");
+    } catch (err: any) {
+      setAuthError(err.message || "An authentication error occurred.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Auth Handler: Logout
+  const handleSignOut = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+      setSession(null);
+      setTransactions([]);
+      showNotification("Logged out successfully!", "info");
+    }
+  };
+
+  // Dynamic emitter database sync save helper
+  const saveTransaction = async (newTxData: Omit<Transaction, 'id' | 'co2e'> & { id?: string; co2e?: number }) => {
+    const co2 = newTxData.co2e ?? (newTxData.amount * EMISSION_FACTORS[newTxData.category].kgCo2ePerDollar);
     
-    setTransactions(generated);
-    // Reset simulator values on preset shift to show authentic starting point
+    if (activeSupabaseMode && session && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('transactions')
+          .insert([{
+            user_id: session.user.id,
+            date: newTxData.date,
+            merchant: newTxData.merchant,
+            amount: newTxData.amount,
+            category: newTxData.category,
+            co2e: co2,
+            source: newTxData.source,
+            confidence: newTxData.confidence
+          }])
+          .select();
+        
+        if (error) throw error;
+        
+        if (data && data[0]) {
+          const returnedTx: Transaction = {
+            id: data[0].id,
+            date: data[0].date,
+            merchant: data[0].merchant,
+            amount: Number(data[0].amount),
+            category: data[0].category as TransactionCategory,
+            co2e: Number(data[0].co2e),
+            source: data[0].source as any,
+            confidence: Number(data[0].confidence)
+          };
+          setTransactions((prev) => [returnedTx, ...prev]);
+          return returnedTx;
+        }
+      } catch (err: any) {
+        showNotification("Supabase Save Error: " + err.message, "error");
+        return null;
+      }
+    } else {
+      // Local Storage mode fallback
+      const generatedTx: Transaction = {
+        id: newTxData.id ?? `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        date: newTxData.date,
+        merchant: newTxData.merchant,
+        amount: newTxData.amount,
+        category: newTxData.category,
+        co2e: co2,
+        source: newTxData.source,
+        confidence: newTxData.confidence
+      };
+      setTransactions((prev) => [generatedTx, ...prev]);
+      return generatedTx;
+    }
+    return null;
+  };
+
+  // Delete transaction action
+  const removeTx = async (id: string) => {
+    if (activeSupabaseMode && session && supabase) {
+      try {
+        const { error } = await supabase
+          .from('transactions')
+          .delete()
+          .eq('id', id);
+        if (error) throw error;
+      } catch (err: any) {
+        showNotification("Supabase Delete Error: " + err.message, "error");
+        return;
+      }
+    }
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    showNotification('Removed transaction row.', 'info');
+  };
+
+  // Wipe account transactions completely
+  const clearLedger = async () => {
+    if (window.confirm('Are you sure you want to wipe current dataset? Your digital twin will reset.')) {
+      if (activeSupabaseMode && session && supabase) {
+        try {
+          const { error } = await supabase
+            .from('transactions')
+            .delete()
+            .eq('user_id', session.user.id);
+          if (error) throw error;
+        } catch (err: any) {
+          showNotification("Supabase Clear Error: " + err.message, "error");
+          return;
+        }
+      }
+      setTransactions([]);
+      showNotification('Wiped accounts transactions.', 'info');
+    }
+  };
+
+  // Preset lifestyle seeder loader
+  const loadPreset = async (preset: typeof DEMO_PRESETS[0]) => {
+    if (activeSupabaseMode && session && supabase) {
+      try {
+        // Wipe existing transactions
+        const { error: deleteError } = await supabase
+          .from('transactions')
+          .delete()
+          .eq('user_id', session.user.id);
+        
+        if (deleteError) throw deleteError;
+
+        // Batch insert new preset rows
+        const rows = preset.transactions.map((tx) => ({
+          user_id: session.user.id,
+          date: tx.date,
+          merchant: tx.merchant,
+          amount: tx.amount,
+          category: tx.category,
+          co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar,
+          source: tx.source,
+          confidence: tx.confidence
+        }));
+
+        const { data, error: insertError } = await supabase
+          .from('transactions')
+          .insert(rows)
+          .select();
+
+        if (insertError) throw insertError;
+
+        if (data) {
+          setTransactions(data.map((tx: any) => ({
+            id: tx.id,
+            date: tx.date,
+            merchant: tx.merchant,
+            amount: Number(tx.amount),
+            category: tx.category as TransactionCategory,
+            co2e: Number(tx.co2e),
+            source: tx.source as any,
+            confidence: Number(tx.confidence)
+          })));
+        }
+      } catch (err: any) {
+        showNotification("Supabase Preset Error: " + err.message, "error");
+        return;
+      }
+    } else {
+      // Local Storage mode
+      const generated = preset.transactions.map((tx, i) => ({
+        ...tx,
+        id: `seed-${Date.now()}-${i}`,
+        co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar
+      })) as Transaction[];
+      setTransactions(generated);
+    }
+    
+    // Reset simulator values on preset shift
     setSimulator({
       meatReduction: 0,
       carlessDays: 0,
@@ -200,10 +391,8 @@ export default function App() {
     showNotification(`Seeded ${preset.name} lifestyle template!`, 'info');
   };
 
-  // --------------------------------------------------------
-  // CSV Import Processor
-  // --------------------------------------------------------
-  const handleCSVImport = (rawText: string) => {
+  // CSV statement parser Ingestion
+  const handleCSVImport = async (rawText: string) => {
     if (!rawText.trim()) {
       showNotification('CSV body is empty. Please enter columns.', 'error');
       return;
@@ -211,13 +400,12 @@ export default function App() {
 
     try {
       const lines = rawText.trim().split('\n');
-      const parsedTransactions: Transaction[] = [];
+      const parsedTransactions: Omit<Transaction, 'id' | 'co2e'>[] = [];
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
 
-        // Split by comma
         const parts = line.split(',');
         if (parts.length >= 3) {
           const date = parts[0]?.trim() || new Date().toISOString().split('T')[0];
@@ -225,19 +413,16 @@ export default function App() {
           const amount = parseFloat(parts[2]?.trim() || '0');
           let category = (parts[3]?.trim() || 'Eco Goods') as TransactionCategory;
 
-          // Normalize category
           if (!EMISSION_FACTORS[category]) {
             category = 'Eco Goods';
           }
 
           if (!isNaN(amount) && amount > 0) {
             parsedTransactions.push({
-              id: `csv-${Date.now()}-${i}`,
               date,
               merchant,
               amount,
               category,
-              co2e: amount * EMISSION_FACTORS[category].kgCo2ePerDollar,
               source: 'upload',
               confidence: 0.9
             });
@@ -246,27 +431,60 @@ export default function App() {
       }
 
       if (parsedTransactions.length === 0) {
-        showNotification('No valid transaction rows found in CSV. Format: Date,Merchant,Amount,Category', 'error');
+        showNotification('No valid transaction rows found in CSV.', 'error');
         return;
       }
 
-      setTransactions((prev) => [...parsedTransactions, ...prev]);
+      if (activeSupabaseMode && session && supabase) {
+        const rows = parsedTransactions.map((tx) => ({
+          user_id: session.user.id,
+          date: tx.date,
+          merchant: tx.merchant,
+          amount: tx.amount,
+          category: tx.category,
+          co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar,
+          source: tx.source,
+          confidence: tx.confidence
+        }));
+
+        const { data, error } = await supabase
+          .from('transactions')
+          .insert(rows)
+          .select();
+
+        if (error) throw error;
+
+        if (data) {
+          const newTxs = data.map((tx: any) => ({
+            id: tx.id,
+            date: tx.date,
+            merchant: tx.merchant,
+            amount: Number(tx.amount),
+            category: tx.category as TransactionCategory,
+            co2e: Number(tx.co2e),
+            source: tx.source as any,
+            confidence: Number(tx.confidence)
+          }));
+          setTransactions((prev) => [...newTxs, ...prev]);
+        }
+      } else {
+        // Local Storage Mode
+        const newTxs = parsedTransactions.map((tx, idx) => ({
+          ...tx,
+          id: `csv-${Date.now()}-${idx}`,
+          co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar
+        })) as Transaction[];
+        setTransactions((prev) => [...newTxs, ...prev]);
+      }
+
       setCsvText('');
-      showNotification(`Successfully parsed & imported ${parsedTransactions.length} transactions via statement!`, 'success');
+      showNotification(`Successfully imported ${parsedTransactions.length} transactions!`, 'success');
     } catch (e: any) {
       showNotification('Failed to read statement. Ensure columns align.', 'error');
     }
   };
 
-  // Load a specified pre-baked text receipt
-  const loadReceiptPreset = (index: number) => {
-    setSelectedReceiptPreset(index);
-    setPastedReceiptText(SAMPLE_RECEIPT_PRESETS[index].text);
-  };
-
-  // --------------------------------------------------------
-  // Receipt OCR Text classification (Gemini API Call)
-  // --------------------------------------------------------
+  // Receipt OCR Text classification (FastAPI Call)
   const processReceiptOCR = async () => {
     if (!pastedReceiptText.trim()) {
       setOcrError('Please enter receipt text or choose one of the quick presets below first.');
@@ -292,36 +510,31 @@ export default function App() {
       const cat = (extracted.category || 'Eco Goods') as TransactionCategory;
       const amount = Number(extracted.amount || 25);
       
-      const newTx: Transaction = {
-        id: `ocr-${Date.now()}`,
+      const saved = await saveTransaction({
         date: extracted.date || new Date().toISOString().split('T')[0],
         merchant: extracted.merchant || 'Extracted Merchant',
         amount: amount,
         category: cat,
-        co2e: amount * EMISSION_FACTORS[cat].kgCo2ePerDollar,
         source: 'ocr',
         confidence: Number(extracted.confidence || 0.95)
-      };
+      });
 
-      setTransactions((prev) => [newTx, ...prev]);
-      setPastedReceiptText('');
-      setSelectedReceiptPreset(null);
-      showNotification(`Ingested $${amount.toFixed(2)} at ${extracted.merchant}! Classified as ${cat} (${Math.round(newTx.co2e)} kg CO2e)`, 'success');
-      
-      // Auto switch target to ecosystem to see the updated twin
-      setActiveTab('ecosystem');
+      if (saved) {
+        setPastedReceiptText('');
+        setSelectedReceiptPreset(null);
+        showNotification(`Ingested $${amount.toFixed(2)} at ${extracted.merchant}! Classified as ${cat} (${Math.round(saved.co2e)} kg CO2e)`, 'success');
+        setActiveTab('ecosystem');
+      }
     } catch (err: any) {
       console.error(err);
-      setOcrError(err.message || 'Gemini transaction extraction failed. Verify your secret variables setting.');
+      setOcrError(err.message || 'Gemini transaction extraction failed. Ensure backend server is running.');
     } finally {
       setOcrLoading(false);
     }
   };
 
-  // --------------------------------------------------------
-  // Manual Ingestion Row Addition
-  // --------------------------------------------------------
-  const addManualTx = (e: React.FormEvent) => {
+  // Manual Ingestion addition
+  const addManualTx = async (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(manualAmount);
     if (!manualMerchant || isNaN(amt) || amt <= 0) {
@@ -329,48 +542,27 @@ export default function App() {
       return;
     }
 
-    const calculatedCo2 = amt * EMISSION_FACTORS[manualCategory].kgCo2ePerDollar;
-    const newTx: Transaction = {
-      id: `manual-${Date.now()}`,
+    const saved = await saveTransaction({
       date: manualDate,
       merchant: manualMerchant,
       amount: amt,
       category: manualCategory,
-      co2e: calculatedCo2,
       source: 'manual',
       confidence: 1.0
-    };
+    });
 
-    setTransactions((prev) => [newTx, ...prev]);
-    setManualMerchant('');
-    setManualAmount('');
-    showNotification(`Logged $${amt.toFixed(2)} to ${manualCategory}!`, 'success');
-  };
-
-  // --------------------------------------------------------
-  // Delete Row
-  // --------------------------------------------------------
-  const removeTx = (id: string) => {
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
-    showNotification('Removed transaction row.', 'info');
-  };
-
-  // Clear Ledger completely
-  const clearLedger = () => {
-    if (window.confirm('Are you sure you want to wipe current dataset? Your digital twin will reset.')) {
-      setTransactions([]);
-      showNotification('Wiped accounts transactions.', 'info');
+    if (saved) {
+      setManualMerchant('');
+      setManualAmount('');
+      showNotification(`Logged $${amt.toFixed(2)} to ${manualCategory}!`, 'success');
     }
   };
 
-  // --------------------------------------------------------
-  // EcoCoach Assistant AI Client Interaction (Gemini API Call)
-  // --------------------------------------------------------
+  // EcoCoach advisor chat request (FastAPI Call)
   const sendCoachPrompt = async (forcedPrompt?: string) => {
     const textToSend = forcedPrompt || chatInput;
     if (!textToSend.trim()) return;
 
-    // Append user bubble
     const userMessage: CoachMessage = {
       id: `usr-${Date.now()}`,
       role: 'user',
@@ -385,7 +577,6 @@ export default function App() {
     setCoachLoading(true);
     setCoachError(null);
 
-    // If active tab is not coach, auto switch to show user feedback
     if (activeTab !== 'coach') {
       setActiveTab('coach');
     }
@@ -396,7 +587,12 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: updatedMessages.map(m => ({ role: m.role, content: m.content })),
-          transactionHistory: transactions
+          transactionHistory: transactions.map(tx => ({
+            merchant: tx.merchant,
+            amount: tx.amount,
+            category: tx.category,
+            co2e: tx.co2e
+          }))
         })
       });
 
@@ -415,16 +611,197 @@ export default function App() {
         }
       ]);
     } catch (err: any) {
-      setCoachError(err.message || 'EcoCoach fails to respond. Ensure your GEMINI_API_KEY is configured.');
+      setCoachError(err.message || 'EcoCoach fails to respond. Ensure backend server and API keys are running.');
     } finally {
       setCoachLoading(false);
     }
   };
 
+  // Load predefined thermal receipt preset
+  const loadReceiptPreset = (index: number) => {
+    setSelectedReceiptPreset(index);
+    setPastedReceiptText(SAMPLE_RECEIPT_PRESETS[index].text);
+  };
+
+  // --------------------------------------------------------
+  // Core Carbon calculations & Twin state transition engine
+  // --------------------------------------------------------
+  const calculateAggregateFootprint = (txList: Transaction[], simState: WhatIfState) => {
+    let totalNormalCO2 = 0;
+    let totalSimulatedCO2 = 0;
+
+    txList.forEach((tx) => {
+      const baseEmission = tx.co2e;
+      totalNormalCO2 += baseEmission;
+
+      // Apply real-time reductions based on what-if sliders
+      let factor = 1.0;
+      if (tx.category === 'Groceries') {
+        factor = 1.0 - (simState.meatReduction / 100) * 0.45;
+      } else if (tx.category === 'Fuel') {
+        factor = 1.0 - (simState.carlessDays / 7);
+      } else if (tx.category === 'Utilities') {
+        factor = 1.0 - (simState.thermostatOffset * 0.04);
+      } else if (tx.category === 'Fast Fashion') {
+        factor = 1.0 - (simState.secondHandPercent / 100) * 0.90;
+      }
+
+      totalSimulatedCO2 += baseEmission * factor;
+    });
+
+    const activeCO2 = totalSimulatedCO2;
+    const weeklyTotal = activeCO2;
+    const dayCount = Math.max(1, Math.ceil(txList.length / 1.5));
+    const calculatedDailyAverage = weeklyTotal / Math.max(1, dayCount);
+
+    const baselineDailyIndex = DAILY_EMISSION_BASELINE_KG;
+    const percentageDifference = ((calculatedDailyAverage - baselineDailyIndex) / baselineDailyIndex) * 100;
+    
+    let trend: 'improving' | 'stable' | 'worsening' = 'stable';
+    if (percentageDifference < -5) {
+      trend = 'improving';
+    } else if (percentageDifference > 5) {
+      trend = 'worsening';
+    }
+
+    let score = Math.round(100 - (calculatedDailyAverage * 3.5));
+    score = Math.max(12, Math.min(100, score));
+
+    let state: 'sapling' | 'thriving' | 'wilting' | 'drought' = 'sapling';
+    if (score >= 82) {
+      state = 'thriving';
+    } else if (score >= 55) {
+      state = 'sapling';
+    } else if (score >= 32) {
+      state = 'wilting';
+    } else {
+      state = 'drought';
+    }
+
+    return {
+      state,
+      score,
+      carbonAverage: calculatedDailyAverage,
+      weeklyTotal,
+      trend,
+      trendPercent: Math.abs(Math.round(percentageDifference)),
+      yearlyTonsEmitted: (calculatedDailyAverage * 365) / 1000,
+      cedarsEquivalent: Math.max(0, Math.round(((DAILY_EMISSION_BASELINE_KG - calculatedDailyAverage) * 365) / 22))
+    };
+  };
+
+  const currentStats = calculateAggregateFootprint(transactions, simulator);
+
+  // --------------------------------------------------------
+  // Recharts Category Breakdown Calculation
+  // --------------------------------------------------------
+  const getCategoryChartData = () => {
+    const categoryTotals: Record<string, number> = {};
+    transactions.forEach((tx) => {
+      categoryTotals[tx.category] = (categoryTotals[tx.category] || 0) + tx.co2e;
+    });
+    return Object.entries(categoryTotals).map(([name, value]) => ({
+      name,
+      value: Math.round(value),
+      color: EMISSION_FACTORS[name as TransactionCategory]?.color.includes('emerald') ? '#10B981' :
+             EMISSION_FACTORS[name as TransactionCategory]?.color.includes('amber') ? '#F59E0B' :
+             EMISSION_FACTORS[name as TransactionCategory]?.color.includes('red') ? '#EF4444' :
+             EMISSION_FACTORS[name as TransactionCategory]?.color.includes('purple') ? '#8B5CF6' :
+             EMISSION_FACTORS[name as TransactionCategory]?.color.includes('blue') ? '#3B82F6' :
+             EMISSION_FACTORS[name as TransactionCategory]?.color.includes('cyan') ? '#06B6D4' :
+             EMISSION_FACTORS[name as TransactionCategory]?.color.includes('orange') ? '#F97316' : '#6B7280'
+    })).filter(item => item.value > 0);
+  };
+
+  const categoryChartData = getCategoryChartData();
+
   return (
     <div className="flex h-screen w-full bg-[#050505] text-[#E0E0E0] font-sans overflow-hidden" id="ecotwin-app">
       
-      {/* 1. LEFT NAVIGATION RAIL */}
+      {/* AUTHENTICATION OVERLAY: MAGIC LINK SIGN IN */}
+      <AnimatePresence>
+        {isSupabaseConfigured && !session && !guestMode && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-[#0c0c0c] border border-white/10 rounded-3xl p-8 max-w-md w-full shadow-2xl relative overflow-hidden"
+            >
+              {/* Background gradient flare */}
+              <div className="absolute rounded-full bg-emerald-500/10 blur-3xl w-52 h-52 -left-12 -top-12 pointer-events-none" />
+              
+              <div className="relative text-center space-y-6">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#2D5A27] to-[#86EFAC] flex items-center justify-center text-black font-extrabold text-2xl mx-auto shadow-lg shadow-green-950/20">
+                  ET
+                </div>
+                
+                <div>
+                  <h2 className="text-3xl font-serif text-slate-100">Welcome to EcoTwin</h2>
+                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                    Verify carbon statements, analyze your visual twin ecosystem, and chat with carbon coaching AI.
+                  </p>
+                </div>
+
+                <form onSubmit={handleMagicLinkLogin} className="space-y-4">
+                  <div className="text-left space-y-1">
+                    <label className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Email Address</label>
+                    <input 
+                      type="email" 
+                      required
+                      placeholder="you@example.com"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-3 text-xs focus:border-[#86EFAC] focus:outline-none focus:ring-1 focus:ring-[#86EFAC]"
+                    />
+                  </div>
+
+                  {authError && (
+                    <div className="p-3 bg-red-950/30 border border-red-900/50 rounded-xl text-red-300 text-xs text-left">
+                      ⚠️ {authError}
+                    </div>
+                  )}
+
+                  {authMessage && (
+                    <div className="p-3 bg-emerald-950/30 border border-emerald-900/50 rounded-xl text-emerald-300 text-xs text-left">
+                      ✓ {authMessage}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full bg-[#86EFAC] hover:bg-[#a0f7c2] text-black font-bold uppercase font-mono tracking-wider py-3 rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    {authLoading ? <RefreshCw className="animate-spin" size={14} /> : <Send size={14} />}
+                    Send Magic Sign-In Link
+                  </button>
+                </form>
+
+                <div className="relative flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10" /></div>
+                  <span className="relative bg-[#0c0c0c] px-3 text-[10px] text-slate-500 uppercase font-mono tracking-widest">Or</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setGuestMode(true)}
+                  className="w-full bg-white/5 hover:bg-white/10 text-white font-mono text-xs font-bold uppercase tracking-wider py-3 rounded-xl border border-white/15 transition-all"
+                >
+                  Demo Offline as Guest
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* LEFT NAVIGATION RAIL */}
       <nav className="w-20 bg-[#0A0A0A] border-r border-white/10 flex flex-col items-center py-6 justify-between shrink-0" id="nav-rail">
         <div className="flex flex-col items-center space-y-8">
           {/* Logo Badge */}
@@ -502,7 +879,7 @@ export default function App() {
 
         {/* Footprint Indicator Quick Ring */}
         <div className="mb-2 flex flex-col items-center">
-          <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center text-center text-xs text-slate-400 font-mono" title="Carbon Average rating">
+          <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center text-center text-xs text-[#86EFAC] font-mono" title="Carbon Average rating">
             {currentStats.score}
           </div>
           <span className="text-[9px] font-mono mt-1 text-slate-500 uppercase tracking-tighter">Vitality</span>
@@ -546,20 +923,50 @@ export default function App() {
             </p>
           </div>
 
-          {/* Quick statement uploader action pill */}
           <div className="flex flex-wrap items-center gap-3 bg-white/5 border border-white/10 rounded-2xl px-4 py-2">
-            <div className="text-right hidden sm:block">
-              <p className="text-[9px] uppercase opacity-40 leading-tight">Current Dataset</p>
-              <p className="text-xs font-mono text-[#86EFAC]">{transactions.length} Transactions Ingested</p>
+            {/* Active storage status badge */}
+            <div className="flex items-center gap-2 pr-2 border-r border-white/10">
+              {activeSupabaseMode ? (
+                <>
+                  <Database size={13} className="text-[#86EFAC]" />
+                  <span className="text-[10px] font-mono text-emerald-400" title="Connected to Supabase PostgreSQL database">Supabase Active</span>
+                </>
+              ) : (
+                <>
+                  <Shield size={13} className="text-amber-500" />
+                  <span className="text-[10px] font-mono text-amber-500" title="Running offline. Transactions saved locally.">Local Storage Guest</span>
+                  {isSupabaseConfigured && (
+                    <button 
+                      onClick={() => setGuestMode(false)}
+                      className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded"
+                    >
+                      Login
+                    </button>
+                  )}
+                </>
+              )}
             </div>
-            <div className="w-px h-6 bg-white/10 hidden sm:block"></div>
-            <div className="flex gap-2">
-              <button 
-                onClick={() => setActiveTab('transactions')}
-                className="text-[11px] font-mono uppercase tracking-widest text-[#86EFAC] hover:text-[#a0f7c2] transition-colors flex items-center gap-1 bg-white/5 px-2.5 py-1 rounded-lg"
-              >
-                <Upload size={10} /> + Ingest Log
-              </button>
+
+            {/* Signed-in user badge */}
+            {session && activeSupabaseMode && (
+              <div className="flex items-center gap-2 pr-2 border-r border-white/10">
+                <User size={13} className="text-slate-400" />
+                <span className="text-[10px] font-mono text-slate-300 max-w-[120px] truncate" title={session.user.email}>
+                  {session.user.email}
+                </span>
+                <button 
+                  onClick={handleSignOut}
+                  className="text-slate-400 hover:text-red-400 transition-colors p-1"
+                  title="Sign Out"
+                >
+                  <LogOut size={13} />
+                </button>
+              </div>
+            )}
+
+            <div className="text-right hidden sm:block">
+              <p className="text-[9px] uppercase opacity-40 leading-tight">Ledger Count</p>
+              <p className="text-xs font-mono text-[#86EFAC]">{transactions.length} Transactions</p>
             </div>
           </div>
         </header>
@@ -568,8 +975,8 @@ export default function App() {
         <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 mb-6">
           <div className="flex items-center gap-2 mb-3">
              <Layers size={14} className="text-slate-400" />
-             <h3 className="text-xs font-mono uppercase tracking-wider text-slate-400">Judge / Presenter Demo Seeder Presets</h3>
-             <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded ml-auto">Frictionless Testing</span>
+             <h3 className="text-xs font-mono uppercase tracking-wider text-slate-400">Presenter / Judge Demo Presets</h3>
+             <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded ml-auto">Instantly seed carbon states</span>
           </div>
           <p className="text-xs text-slate-400 mb-3 font-sans">
             Instantly shift modes without typing text or uploading files to test tree reactions and real spend carbon coefficients:
@@ -619,16 +1026,16 @@ export default function App() {
                  <div>
                    <p className="text-[10px] uppercase opacity-40 font-mono tracking-widest mb-1">Impact Mitigation Equivalent</p>
                    {currentStats.cedarsEquivalent > 0 ? (
-                     <div className="flex items-baseline gap-2 text-[#86EFAC]">
-                       <span className="text-4xl font-light font-serif tracking-tight">{currentStats.cedarsEquivalent}</span>
-                       <span className="text-xs text-[#86EFAC]/70 font-mono">Siberian Cedars/yr</span>
-                     </div>
-                   ) : (
-                     <div className="text-amber-500 font-medium text-xs mt-1 flex items-center gap-1">
-                       <AlertTriangle size={14} />
-                       <span>Footprint is currently over standard. Zero trees saved.</span>
-                     </div>
-                   )}
+                      <div className="flex items-baseline gap-2 text-[#86EFAC]">
+                        <span className="text-4xl font-light font-serif tracking-tight">{currentStats.cedarsEquivalent}</span>
+                        <span className="text-xs text-[#86EFAC]/70 font-mono">Siberian Cedars/yr</span>
+                      </div>
+                    ) : (
+                      <div className="text-amber-500 font-medium text-xs mt-1 flex items-center gap-1">
+                        <AlertTriangle size={14} />
+                        <span>Footprint is currently over standard. Zero trees saved.</span>
+                      </div>
+                    )}
                  </div>
                  <p className="text-[11px] text-slate-500 mt-2 italic block">
                    Sequestration translates pure carbon offsets into biological targets.
@@ -636,43 +1043,50 @@ export default function App() {
               </div>
             </div>
 
-            {/* Recent Ledger Panel */}
-            <div className="bg-black/30 border border-white/5 p-4 rounded-2xl">
-               <div className="flex justify-between items-center mb-3">
-                 <span className="text-xs uppercase tracking-widest font-mono text-slate-400">Dynamic Ingest Feed</span>
-                 <button onClick={() => setActiveTab('transactions')} className="text-[11px] text-[#86EFAC] hover:underline flex items-center gap-1">
-                   Manage ledger ({transactions.length}) ✕
-                 </button>
-               </div>
-               
-               <div className="space-y-2 max-h-[160px] overflow-y-auto">
-                 {transactions.length === 0 ? (
-                   <p className="text-xs italic text-slate-500 text-center py-4">No logged spend in ledger. Seed a preset or load statements to begin.</p>
-                 ) : (
-                   transactions.slice(0, 3).map((t) => (
-                     <div key={t.id} className="bg-white/[0.01] border border-white/[0.03] p-2.5 rounded-xl flex items-center justify-between text-xs transition-colors hover:bg-white/[0.03]">
-                       <div className="flex items-center gap-3">
-                         <span className="font-mono text-[10px] text-slate-500">{t.date}</span>
-                         <div>
-                           <p className="font-semibold text-slate-300">{t.merchant}</p>
-                           <p className="text-[9px] text-[#86EFAC] font-mono">{t.category} (${t.amount.toFixed(2)})</p>
-                         </div>
-                       </div>
-                       
-                       <div className="flex items-center gap-3">
-                         <span className={`font-mono text-xs font-semibold ${t.co2e > 50 ? 'text-red-400' : t.co2e > 15 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                           +{t.co2e.toFixed(1)} kgCO₂
-                         </span>
-                         {t.confidence < 1 && t.confidence > 0 && (
-                           <span className="text-[9px] px-1 py-0.5 rounded bg-blue-950/40 text-blue-300 border border-blue-900" title={`AI Categorized Confidence: ${Math.round(t.confidence * 100)}%`}>
-                             AI
-                           </span>
-                         )}
-                       </div>
-                     </div>
-                   ))
-                 )}
-               </div>
+            {/* Category Breakdown Recharts Pie Chart (New Stack Feature) */}
+            <div className="bg-gradient-to-b from-white/[0.02] to-transparent border border-white/5 p-5 rounded-2xl">
+              <span className="text-xs uppercase tracking-widest font-mono text-slate-400 block mb-4">Carbon Share by Category</span>
+              {categoryChartData.length === 0 ? (
+                <p className="text-xs italic text-slate-500 text-center py-8">No carbon data to display. Add transactions to generate distribution charts.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-4">
+                  <div className="h-44 md:col-span-6">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={categoryChartData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={65}
+                          paddingAngle={3}
+                          dataKey="value"
+                        >
+                          {categoryChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          formatter={(value) => [`${value} kgCO₂e`, 'Emissions']}
+                          contentStyle={{ backgroundColor: '#0c0c0c', borderColor: '#333', borderRadius: '10px' }}
+                          labelStyle={{ color: '#fff' }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="md:col-span-6 space-y-1.5 max-h-40 overflow-y-auto">
+                    {categoryChartData.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-xs font-mono">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                          <span className="text-slate-300">{item.name}</span>
+                        </div>
+                        <span className="font-semibold text-slate-200">{item.value} kg</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -683,11 +1097,11 @@ export default function App() {
             <div className={`p-6 bg-gradient-to-b from-white/[0.02] to-transparent border rounded-3xl flex flex-col justify-between transition-all duration-300 ${activeTab === 'simulator' ? 'border-[#86EFAC]/30 shadow-lg shadow-green-950/10' : 'border-white/10'}`}>
               <div className="flex justify-between items-center mb-6">
                  <div>
-                   <h3 className="text-sm uppercase tracking-widest font-bold flex items-center gap-2">
-                     <Sliders size={14} className="text-[#86EFAC]" />
-                     What-If Simulator
-                   </h3>
-                   <p className="text-[10px] opacity-50 mt-1">Simulate instant lifestyle adjustments</p>
+                    <h3 className="text-sm uppercase tracking-widest font-bold flex items-center gap-2">
+                      <Sliders size={14} className="text-[#86EFAC]" />
+                      What-If Simulator
+                    </h3>
+                    <p className="text-[10px] opacity-50 mt-1">Simulate instant lifestyle adjustments</p>
                  </div>
                  <span className="px-2 py-1 bg-[#86EFAC]/10 text-[#86EFAC] text-[10px] rounded font-mono">Live Forecast</span>
               </div>
@@ -774,7 +1188,6 @@ export default function App() {
                 </div>
               </div>
               
-              {/* Simulator bottom feedback note */}
               <div className="mt-6 p-3 border border-[#86EFAC]/20 bg-[#86EFAC]/5 rounded-xl">
                  <p className="text-center text-xs italic text-[#86EFAC] font-sans">
                    {currentStats.cedarsEquivalent > 0 ? (
@@ -1180,7 +1593,7 @@ export default function App() {
             Spend factors mapped: Flights (1.25 kgCO2e/$), Fuel (0.82 kgCO2e/$), Utilities (0.65 kgCO2e/$), Fast Fashion (0.45 kgCO2e/$), Groceries (0.22 kgCO2e/$).
           </p>
           <p>
-            © 2026 EcoTwin Inc. Integrated with Google Gemini model intelligence.
+            © 2026 EcoTwin Inc. Integrated with Google Gemini model intelligence and optional Supabase backend sync.
           </p>
         </footer>
 
