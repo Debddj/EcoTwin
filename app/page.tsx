@@ -21,7 +21,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recha
 import { toast, Toaster } from 'sonner';
 
 import { TransactionCategory } from '@/types';
-import { EMISSION_FACTORS, DEMO_PRESETS, SAMPLE_CSV_CONTENT, SAMPLE_RECEIPT_PRESETS } from '@/data/mockData';
+import { EMISSION_FACTORS, DEMO_PRESETS, SAMPLE_CSV, RECEIPT_PRESETS } from '@/lib/constants/emission-factors';
 import TwinAvatar from '@/components/TwinAvatar';
 import { useEcoStore } from '@/store/useEcoStore';
 
@@ -234,7 +234,7 @@ export default function Home() {
 
   const handleReceiptPresetClick = (idx: number) => {
     setSelectedReceiptPreset(idx);
-    const preset = SAMPLE_RECEIPT_PRESETS[idx];
+    const preset = RECEIPT_PRESETS[idx];
     if (preset) {
       setPastedReceiptText(preset.text);
     }
@@ -569,7 +569,7 @@ export default function Home() {
                         <div className="space-y-1.5">
                           <span className="text-[9px] font-mono uppercase tracking-widest text-slate-500 block">Load Receipt Presets:</span>
                           <div className="flex flex-wrap gap-2">
-                            {SAMPLE_RECEIPT_PRESETS.map((preset, idx) => (
+                            {RECEIPT_PRESETS.map((preset, idx) => (
                               <button
                                 key={idx}
                                 type="button"
@@ -707,7 +707,7 @@ export default function Home() {
                             <div>2026-06-18,Chevron Gas Station,54.50,Fuel,CSV</div>
                             <button
                               type="button"
-                              onClick={() => setCsvText(SAMPLE_CSV_CONTENT)}
+                              onClick={() => setCsvText(SAMPLE_CSV)}
                               className="text-[10px] text-brand-400 hover:text-brand-300 underline font-bold mt-1 block"
                             >
                               Load demo CSV statement text
@@ -1030,7 +1030,9 @@ export default function Home() {
                               : 'bg-white/[0.02] border border-white/5 text-slate-300 rounded-tl-none'
                           }`}>
                             <div className="whitespace-pre-line">{msg.content}</div>
-                            <span className="text-[9px] font-mono text-slate-500 block text-right mt-2">{msg.timestamp}</span>
+                            <span className="text-[9px] font-mono text-slate-500 block text-right mt-2">
+                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
                           </div>
                         </div>
                       );

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Transaction, TransactionCategory, WhatIfState, CoachMessage, DemoPreset } from '@/types';
-import { EMISSION_FACTORS, DEMO_PRESETS } from '@/data/mockData';
+import { EMISSION_FACTORS, DEMO_PRESETS } from '@/lib/constants/emission-factors';
 
 interface EcoState {
   // Navigation & UI tab state
@@ -10,7 +10,7 @@ interface EcoState {
   // Transactions State
   transactions: Transaction[];
   setTransactions: (txs: Transaction[]) => void;
-  addTransaction: (tx: Omit<Transaction, 'id' | 'co2e'>) => Transaction;
+  addTransaction: (tx: Omit<Transaction, 'id' | 'co2e' | 'createdAt'>) => Transaction;
   removeTransaction: (id: string) => void;
   clearLedger: () => void;
   loadPreset: (preset: DemoPreset) => void;
@@ -58,6 +58,7 @@ export const useEcoStore = create<EcoState>((set, get) => ({
       ...txData,
       id: `local-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       co2e: co2,
+      createdAt: Date.now()
     };
     
     const updated = [newTx, ...get().transactions];
@@ -89,7 +90,8 @@ export const useEcoStore = create<EcoState>((set, get) => ({
     const generated = preset.transactions.map((tx, i) => ({
       ...tx,
       id: `seed-${Date.now()}-${i}`,
-      co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar
+      co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar,
+      createdAt: Date.now() - (preset.transactions.length - i) * 1000
     })) as Transaction[];
     
     set({
@@ -138,7 +140,8 @@ export const useEcoStore = create<EcoState>((set, get) => ({
               category,
               co2e: co2,
               source: 'upload',
-              confidence: 0.9
+              confidence: 0.9,
+              createdAt: Date.now() - i * 100
             });
           }
         }
@@ -182,7 +185,7 @@ export const useEcoStore = create<EcoState>((set, get) => ({
       id: 'welcome',
       role: 'assistant',
       content: "Hello! I am EcoCoach, your carbon intelligence advisor. Connect your ledger, slide the green parameters, or upload a store receipt below, and I'll analyze specific habits for carbon reductions.",
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      timestamp: Date.now()
     }
   ],
 
@@ -190,7 +193,7 @@ export const useEcoStore = create<EcoState>((set, get) => ({
     const newMsg: CoachMessage = {
       ...msg,
       id: `chat-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      timestamp: Date.now()
     };
     set((state) => ({ chatMessages: [...state.chatMessages, newMsg] }));
   },
@@ -222,7 +225,8 @@ export const useEcoStore = create<EcoState>((set, get) => ({
           id: `init-${idx}-${Date.now()}`,
           co2e: t.amount * EMISSION_FACTORS[t.category].kgCo2ePerDollar,
           source: 'seed',
-          confidence: t.confidence || 1.0
+          confidence: t.confidence || 1.0,
+          createdAt: Date.now() - (defaultPreset.transactions.length - idx) * 1000
         })) as Transaction[];
         set({ transactions: initialTxs });
         localStorage.setItem('ecotwin_transactions', JSON.stringify(initialTxs));
