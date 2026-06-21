@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { EcoCoachRequestSchema } from "@/lib/validations/schemas";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,7 +13,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { messages, transactionHistory } = body;
+    const parseResult = EcoCoachRequestSchema.safeParse(body);
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { success: false, error: parseResult.error.issues[0]?.message || "Invalid request body." },
+        { status: 400 }
+      );
+    }
+    const { messages, transactionHistory } = parseResult.data;
 
     // Calculate aggregated statistics
     let totalSpend = 0;
@@ -58,6 +66,9 @@ export async function POST(req: NextRequest) {
     let activePrompt = "";
     if (messages && messages.length > 0) {
       const lastMsg = messages[messages.length - 1];
+      if (!lastMsg) {
+        throw new Error("No message content was found.");
+      }
       const chatContext = messages
         .map((m: { role: string; content: string }) => `${m.role === "user" ? "User" : "Coach"}: ${m.content}`)
         .join("\n");

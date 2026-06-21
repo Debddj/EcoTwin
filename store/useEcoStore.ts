@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { Transaction, TransactionCategory, WhatIfState, CoachMessage, DemoPreset } from '@/types';
-import { EMISSION_FACTORS, DEMO_PRESETS } from '@/lib/constants/emission-factors';
+import { DEMO_PRESETS } from '@/lib/constants/emission-factors';
+import { computeCO2e, parseCsvToTransactions } from '@/lib/utils/carbon';
+import { TransactionRepository } from '@/lib/storage/repository';
 
 interface EcoState {
   // Navigation & UI tab state
@@ -49,11 +51,11 @@ export const useEcoStore = create<EcoState>((set, get) => ({
   transactions: [],
   setTransactions: (transactions) => {
     set({ transactions });
-    localStorage.setItem('ecotwin_transactions', JSON.stringify(transactions));
+    TransactionRepository.save(transactions);
   },
 
   addTransaction: (txData) => {
-    const co2 = txData.amount * EMISSION_FACTORS[txData.category].kgCo2ePerDollar;
+    const co2 = computeCO2e(txData.amount, txData.category);
     const newTx: Transaction = {
       ...txData,
       id: `local-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
@@ -61,19 +63,18 @@ export const useEcoStore = create<EcoState>((set, get) => ({
       createdAt: Date.now()
     };
     
-    const updated = [newTx, ...get().transactions];
+    const updated = TransactionRepository.add(newTx);
     set({ transactions: updated });
-    localStorage.setItem('ecotwin_transactions', JSON.stringify(updated));
     return newTx;
   },
 
   removeTransaction: (id) => {
-    const updated = get().transactions.filter((t) => t.id !== id);
+    const updated = TransactionRepository.remove(id);
     set({ transactions: updated });
-    localStorage.setItem('ecotwin_transactions', JSON.stringify(updated));
   },
 
   clearLedger: () => {
+    TransactionRepository.clear();
     set({
       transactions: [],
       simulator: {
@@ -83,17 +84,17 @@ export const useEcoStore = create<EcoState>((set, get) => ({
         secondHandPercent: 0
       }
     });
-    localStorage.setItem('ecotwin_transactions', JSON.stringify([]));
   },
 
   loadPreset: (preset) => {
     const generated = preset.transactions.map((tx, i) => ({
       ...tx,
       id: `seed-${Date.now()}-${i}`,
-      co2e: tx.amount * EMISSION_FACTORS[tx.category].kgCo2ePerDollar,
+      co2e: computeCO2e(tx.amount, tx.category),
       createdAt: Date.now() - (preset.transactions.length - i) * 1000
     })) as Transaction[];
     
+    TransactionRepository.save(generated);
     set({
       transactions: generated,
       simulator: {
@@ -103,7 +104,6 @@ export const useEcoStore = create<EcoState>((set, get) => ({
         secondHandPercent: 0
       }
     });
-    localStorage.setItem('ecotwin_transactions', JSON.stringify(generated));
   },
 
   importCSV: (rawText) => {
@@ -112,49 +112,21 @@ export const useEcoStore = create<EcoState>((set, get) => ({
     }
 
     try {
-      const lines = rawText.trim().split('\n');
-      const parsedTransactions: Transaction[] = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i]?.trim();
-        if (!line) continue;
-
-        const parts = line.split(',');
-        if (parts.length >= 3) {
-          const date = parts[0]?.trim() || (new Date().toISOString().split('T')[0] as string);
-          const merchant = parts[1]?.trim() || 'Unlisted Store';
-          const amount = parseFloat(parts[2]?.trim() || '0');
-          let category = (parts[3]?.trim() || 'Eco Goods') as TransactionCategory;
-
-          if (!EMISSION_FACTORS[category]) {
-            category = 'Eco Goods';
-          }
-
-          if (!isNaN(amount) && amount > 0) {
-            const co2 = amount * EMISSION_FACTORS[category].kgCo2ePerDollar;
-            parsedTransactions.push({
-              id: `csv-${Date.now()}-${i}`,
-              date,
-              merchant,
-              amount,
-              category,
-              co2e: co2,
-              source: 'upload',
-              confidence: 0.9,
-              createdAt: Date.now() - i * 100
-            });
-          }
-        }
-      }
-
-      if (parsedTransactions.length === 0) {
+      const parsed = parseCsvToTransactions(rawText);
+      if (parsed.length === 0) {
         return { success: false, count: 0, error: 'No valid transaction rows found in CSV.' };
       }
 
-      const updated = [...parsedTransactions, ...get().transactions];
+      const generated = parsed.map((tx, i) => ({
+        ...tx,
+        id: `csv-${Date.now()}-${i}`,
+        co2e: computeCO2e(tx.amount, tx.category),
+        createdAt: Date.now() - i * 100
+      })) as Transaction[];
+
+      const updated = TransactionRepository.addMany(generated);
       set({ transactions: updated });
-      localStorage.setItem('ecotwin_transactions', JSON.stringify(updated));
-      return { success: true, count: parsedTransactions.length };
+      return { success: true, count: generated.length };
     } catch (e: any) {
       return { success: false, count: 0, error: 'Failed to read statement. Ensure columns align.' };
     }
@@ -213,9 +185,9 @@ export const useEcoStore = create<EcoState>((set, get) => ({
 
   initializeStore: () => {
     if (typeof window === 'undefined') return;
-    const cached = localStorage.getItem('ecotwin_transactions');
-    if (cached) {
-      set({ transactions: JSON.parse(cached) });
+    const cached = TransactionRepository.getAll();
+    if (cached.length > 0) {
+      set({ transactions: cached });
     } else {
       // Preload suburban commuter preset by default
       const defaultPreset = DEMO_PRESETS[1];
@@ -223,13 +195,13 @@ export const useEcoStore = create<EcoState>((set, get) => ({
         const initialTxs = defaultPreset.transactions.map((t, idx) => ({
           ...t,
           id: `init-${idx}-${Date.now()}`,
-          co2e: t.amount * EMISSION_FACTORS[t.category].kgCo2ePerDollar,
-          source: 'seed',
+          co2e: computeCO2e(t.amount, t.category),
+          source: 'seed' as const,
           confidence: t.confidence || 1.0,
           createdAt: Date.now() - (defaultPreset.transactions.length - idx) * 1000
         })) as Transaction[];
+        TransactionRepository.save(initialTxs);
         set({ transactions: initialTxs });
-        localStorage.setItem('ecotwin_transactions', JSON.stringify(initialTxs));
       }
     }
   }

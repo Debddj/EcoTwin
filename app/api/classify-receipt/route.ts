@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { ClassifyReceiptSchema } from "@/lib/validations/schemas";
 
 export async function POST(req: NextRequest) {
   try {
@@ -12,7 +13,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { receiptText, imageBase64, imageMime } = body;
+    const parseResult = ClassifyReceiptSchema.safeParse(body);
+    if (!parseResult.success) {
+      return NextResponse.json(
+        { success: false, error: parseResult.error.issues[0]?.message || "Invalid request body." },
+        { status: 400 }
+      );
+    }
+    const { receiptText, imageBase64, imageMime } = parseResult.data;
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
@@ -43,13 +51,13 @@ export async function POST(req: NextRequest) {
     if (imageBase64 && imageMime) {
       let cleanBase64 = imageBase64;
       if (cleanBase64.includes(",")) {
-        cleanBase64 = cleanBase64.split(",")[1];
+        cleanBase64 = cleanBase64.split(",")[1] ?? "";
       }
 
       contents.push({
         inlineData: {
           data: cleanBase64 || "",
-          mimeType: imageMime
+          mimeType: imageMime as string
         }
       });
       contents.push(

@@ -22,6 +22,7 @@ import { toast, Toaster } from 'sonner';
 
 import { TransactionCategory } from '@/types';
 import { EMISSION_FACTORS, DEMO_PRESETS, SAMPLE_CSV, RECEIPT_PRESETS } from '@/lib/constants/emission-factors';
+import { calculateTwinStatus } from '@/lib/utils/carbon';
 import TwinAvatar from '@/components/TwinAvatar';
 import { useEcoStore } from '@/store/useEcoStore';
 
@@ -240,69 +241,8 @@ export default function Home() {
     }
   };
 
-  // Aggregate Calculations
-  const calculateAggregate = () => {
-    let totalSimulatedCO2 = 0;
-
-    transactions.forEach((tx) => {
-      const baseEmission = tx.co2e;
-
-      // Apply real-time reductions based on what-if parameters
-      let factor = 1.0;
-      if (tx.category === 'Groceries') {
-        factor = 1.0 - (simulator.meatReduction / 100) * 0.45;
-      } else if (tx.category === 'Fuel') {
-        factor = 1.0 - (simulator.carlessDays / 7);
-      } else if (tx.category === 'Utilities') {
-        factor = 1.0 - (simulator.thermostatOffset * 0.04);
-      } else if (tx.category === 'Fast Fashion') {
-        factor = 1.0 - (simulator.secondHandPercent / 100) * 0.90;
-      }
-
-      totalSimulatedCO2 += baseEmission * factor;
-    });
-
-    const activeCO2 = totalSimulatedCO2;
-    const dayCount = Math.max(1, Math.ceil(transactions.length / 1.5));
-    const calculatedDailyAverage = activeCO2 / Math.max(1, dayCount);
-
-    const baselineDailyIndex = 13.5;
-    const percentageDifference = ((calculatedDailyAverage - baselineDailyIndex) / baselineDailyIndex) * 100;
-    
-    let trend: 'improving' | 'stable' | 'worsening' = 'stable';
-    if (percentageDifference < -5) {
-      trend = 'improving';
-    } else if (percentageDifference > 5) {
-      trend = 'worsening';
-    }
-
-    let score = Math.round(100 - (calculatedDailyAverage * 3.5));
-    score = Math.max(12, Math.min(100, score));
-
-    let moodState: 'sapling' | 'thriving' | 'wilting' | 'drought' = 'sapling';
-    if (score >= 82) {
-      moodState = 'thriving';
-    } else if (score >= 55) {
-      moodState = 'sapling';
-    } else if (score >= 32) {
-      moodState = 'wilting';
-    } else {
-      moodState = 'drought';
-    }
-
-    return {
-      state: moodState,
-      score,
-      carbonAverage: calculatedDailyAverage,
-      weeklyTotal: activeCO2,
-      trend,
-      trendPercent: Math.abs(Math.round(percentageDifference)),
-      yearlyTonsEmitted: (calculatedDailyAverage * 365) / 1000,
-      cedarsEquivalent: Math.max(0, Math.round(((baselineDailyIndex - calculatedDailyAverage) * 365) / 22))
-    };
-  };
-
-  const status = calculateAggregate();
+  // Aggregate Calculations using centralized utility
+  const status = calculateTwinStatus(transactions, simulator);
 
   // Recharts Chart calculation
   const getCategoryChartData = () => {
